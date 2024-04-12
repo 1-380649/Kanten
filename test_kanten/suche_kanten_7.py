@@ -35,12 +35,12 @@ import datetime
 
 global image_path
 # Bild laden und vorbereiten
-# image_path = 'testfiles/utt_060224_361dpi.jpg'  # -> geht
+image_path = 'testfiles/utt_060224_361dpi.jpg'  # -> geht
 # image_path = 'testfiles/utt_060224_361dpi_stark_geschaerft.jpg' # -> geht
 # image_path = 'testfiles/utt_060224_444dpi.jpg'  # -> geht (deutlich zuviel schwingung in der kurve bei maxLineGap=40)
 # image_path = 'testfiles/utt_060224_300.jpg'  # -> geht wenn in zeile 195 maxLineGap= von 30 auf 40 oder bei 30 und threshold=45 -> DAS MUSS NOCH BEI DEN ANDEREN GETESTET WERDEN
 # image_path = 'testfiles/utt_4k_14_170814_UTT_SG_ECI_TW9.jpg'  # -> geht
-image_path = 'testfiles/PAL_UTT262_240209_002_anBLHA.jpg'  # -> geht nicht bei maxLineGap=40
+# image_path = 'testfiles/PAL_UTT262_240209_002_anBLHA.jpg'  # -> geht nicht bei maxLineGap=40
 # zeile 195 ist ein interessanter filter
 # momentan würde ich entweder maxLineGap= irgendwas zwischen 30 und 39 versuchen oder 30 lassen weil bewährt und lieber mit threshold weiter spielen
 
@@ -976,10 +976,13 @@ def process_images(temp_dir):
 
                 # Bild mit Präfix "normalisiert__" speichern
                 output_path = os.path.join(temp_dir, f"normalisiert__{file}")
+
                 # normalisierung nicht übergehen
-                lum_pil = Image.fromarray(normalisiert.astype(np.uint8))  # Konvertierung für PIL
+                # lum_pil = Image.fromarray(normalisiert.astype(np.uint8))  # Konvertierung für PIL
+
                 # normalisierung übergehen
-                # lum_pil = Image.fromarray(lum_image.astype(np.uint8))  # Konvertierung für PIL
+                lum_pil = Image.fromarray(lum_image.astype(np.uint8))  # Konvertierung für PIL
+
                 lum_pil.save(output_path)  # Speichern mit PIL
 
                 # Bild anzeigen
@@ -1155,12 +1158,13 @@ def berechnung_mtf(temp_dir):
     results = []  # Sammeln von Ergebnissen für alle Dateien
     edge_width = EDGE_groesse # Breite des Randes, der für die MTF-Berechnung verwendet wird (Am Anfang des Skripts definiert)
 
+
     # Liste aller Dateien im Ordner temp_dir
     files = os.listdir(temp_dir)
 
     # Bearbeite jedes Bild im Ordner
     for file in files:
-        if file.startswith("normalisiert__") and (file.endswith("__h.png") or file.endswith("__v.png")):
+        if file.startswith("normalisiert__") and (file.endswith("01__v.png") or file.endswith("02__h.png")):
         # if file.startswith("normalisiert__") and (file.endswith("E20__h.png") or file.endswith("E11__v.png")):
             print("Datei --------------- :", file)  # Ausgabe des Dateinamens
 
@@ -1241,6 +1245,7 @@ def berechnung_mtf(temp_dir):
                     x_range = np.clip(np.arange(x - edge_width // 2, x + edge_width // 2 + 1), 0, roiw - 1)
                     edge_straight[idx, :] = region[y_positions[idx], x_range]
 
+                '''
                 # Visualisierung der extrahierten Linie auf dem Originalbild
                 pp.figure(figsize=(10, 5))
                 pp.imshow(region, cmap='gray')
@@ -1249,11 +1254,13 @@ def berechnung_mtf(temp_dir):
                 # pp.show()
                 pp.pause(0.5)  # Anzeige für 1 Sekunde pausieren
                 pp.close()  # Fenster schließen
-
+                '''
 
 
                 if edge_straight is not None:
+
                     # Visualisieren des 'edge_straight'-Bildes zum Debuggen -----------------------
+                    '''
                     pp.figure()
                     pp.imshow(edge_straight, cmap='gray')
                     pp.title(f'Edge Straight - {individual_id}')
@@ -1261,14 +1268,42 @@ def berechnung_mtf(temp_dir):
                     # pp.show()
                     pp.pause(0.5)  # Anzeige für 1 Sekunde pausieren
                     pp.close()  # Fenster schließen
+                    '''
                     # ENDE Visualisieren des 'edge_straight'-Bildes zum Debuggen -----------------------
 
                     # compute Edge Spread Function (ESF), Line Spread Function (LSF), and filtered LSF
                     edge = edge_straight
                     esf = np.mean(edge, axis=0)
 
-                    esf = scipy.signal.wiener(esf, 5)[3:-3]
-                    lsf = np.gradient(esf)[1:]
+                    # die funktionalität rising_edge ----------------------------------:
+                    # Bestimme die 10% und 90% Werte der maximalen ESF
+                    # es kann sein dass 0.1 bis 0.9 nicht mehr genug varianz in der lsf lässt mum fft zu berechnen und es dann einen fehler gibt
+                    # dann vielleicht besser nicht mit esf_rising sondern mit esf weiterarbeiten oder anstelle von 0.1 und 0.9 mit 0 und 1 rechnen
+                    esf_min = np.min(esf)
+                    esf_max = np.max(esf)
+                    esf_range = esf_max - esf_min
+                    lower_bound = esf_min + 0 * esf_range
+                    upper_bound = esf_min + 1 * esf_range
+                    # Finde die Indizes, die den Bereich zwischen den Grenzen einschließen
+                    indices = np.where((esf >= lower_bound) & (esf <= upper_bound))[0]
+                    print('esf---------------------: ', esf)
+                    print('len(esf)----------------: ', len(esf))
+                    print('len(indices)------------: ', len(indices))
+                    print('indices-----------------: ', indices)
+                    print('esf_range---------------: ', esf_range)
+                    if len(indices) < 2:
+                        # Nicht genug Punkte für eine sinnvolle Analyse
+                        return None, None
+                    start_index, end_index = indices[0], indices[-1]
+                    # Schneide das ESF auf den Bereich mit steigender Kante
+                    esf_rising = esf[start_index:end_index + 1]
+                    # ENDE funktionalität rising_edge ----------------------------------:
+
+                    # bei fehler von fft hier mit esf statt esf_rising weiterarbeiten
+                    esf_filtered = scipy.signal.wiener(esf_rising, 5)[3:-3]
+                    # esf_filtered = scipy.signal.wiener(esf, 5)[3:-3]
+                    lsf = np.gradient(esf_rising)[1:]
+                    # lsf = np.gradient(esf)[1:]
                     lsfs = scipy.signal.wiener(lsf, 7)[4:-4] # default
                     # lsfs = scipy.signal.wiener(lsf, 11)[6:-6] # mehr glättung
                     # compute filtered & unfiltered MTF
@@ -1302,56 +1337,74 @@ def berechnung_mtf(temp_dir):
 results = berechnung_mtf(temp_dir)
 
 
-def plot_mtf_and_esf(edge_image, individual_id, esf, lsf, lsfs, mtf, mtfs, edge_angle, x_mtf, mtf50, mtf20, mtf10, lsfmax, lsfmin, lsfunc):
+
+
+def plot_mtf_and_esf(temp_dir, edge_image, individual_id, esf, lsf, lsfs, mtf, mtfs, edge_angle, x_mtf, mtf50, mtf20, mtf10, lsfmax, lsfmin, lsfunc):
     print("Individual ID:", individual_id)
     print(os.path.basename(image_path))
+    # Aktuelles Datum und Uhrzeit erhalten
+    current_time = datetime.datetime.now()
+    # Formatieren des Datums und der Uhrzeit als String
+    time_str = current_time.strftime('%Y-%m-%d %H:%M:%S')
 
+    # Plot ESF LSF MTF
     # Plot ESF
-    pp.figure(figsize=(10, 5), dpi=110)
-    pp.subplot(1, 2, 1)
+    pp.figure(figsize=(20, 10), dpi=110)
+    pp.subplot(1, 3, 1)
     pp.plot(esf, label='ESF')
-    pp.title(f'Edge Spread Function (ESF) - {individual_id}')
+    pp.title(f'ESF - {individual_id}')
+    pp.xlabel('Pixel Position')
+    pp.ylabel('Intensity')
+    pp.grid(True)
+    pp.legend()
+
+    # Plot LSF
+    pp.subplot(1, 3, 2)
+    pp.plot(lsf, label='LSF')
+    pp.plot(lsfs, label='LSF Filtered')
+    pp.title(f'LSF - {individual_id}')
     pp.xlabel('Pixel Position')
     pp.ylabel('Intensity')
     pp.grid(True)
     pp.legend()
 
     # Plot MTF
-    pp.subplot(1, 2, 2)
-    pp.plot(mtf, label='MTF')
-    pp.plot(mtfs, label='MTF Filtered')
-    pp.title(f'Modulation Transfer Function (MTF) - {individual_id}')
+    pp.subplot(1, 3, 3)
+    pp.plot(x_mtf, mtf, label='MTF')
+    pp.plot(x_mtf, mtfs, label='MTF Filtered')
+    pp.title(f'MTF - {individual_id}')
+    pp.axhline(y=0.5, color='r', linestyle='--', label='MTF50')
+    pp.axhline(y=0.2, color='g', linestyle='--', label='MTF20')
+    pp.axhline(y=0.1, color='b', linestyle='--', label='MTF10')
     pp.xlabel('Frequency (cycles/pixel)')
     pp.ylabel('MTF')
     pp.grid(True)
     pp.legend()
-
-    pp.tight_layout()
+    # Achseneinteilung anpassen
+    # Anzeige von Datum und Uhrzeit im Plot, oben links
+    pp.figtext(0.01, 0.99, f'Aktualisiert am: {time_str} - {os.path.basename(image_path)}', ha="left", va="top", fontsize=10, bbox={"facecolor": "orange", "alpha": 0.5, "pad": 5})
+    #---------sichern der ansicht ----------
+    esf_mtf_filename = os.path.join(temp_dir, f"esf_lsf_mtf_{individual_id}.png")
+    pp.savefig(esf_mtf_filename)
+    # -Ende----sichern der ansicht ----------
     # pp.show()
     pp.pause(0.5)  # Anzeige für 1 Sekunde pausieren
     pp.close()  # Fenster schließen
 
-    # Plot LSF
-    pp.figure(figsize=(10, 5), dpi=110)
-    pp.subplot(1, 2, 1)
-    pp.plot(lsf, label='LSF')
-    pp.plot(lsfs, label='LSF Filtered')
-    pp.title(f'Line Spread Function (LSF) - {individual_id}')
-    pp.xlabel('Pixel Position')
-    pp.ylabel('Intensity')
-    pp.grid(True)
-    pp.legend()
 
-    pp.subplot(1, 2, 2)
+    # Plot Edge Image
+    '''
+    pp.figure(figsize=(10, 5), dpi=110)
     pp.imshow(edge_image, cmap='gray')
     pp.title(f'Edge Image - {individual_id}')
-    pp.axis('off')  # Turn off axis numbers and ticks
-
+    pp.axis('on')  # Turn off axis numbers and ticks
     # pp.show()
     pp.pause(0.5)  # Anzeige für 1 Sekunde pausieren
     pp.close()  # Fenster schließen
+    '''
 
     # Plot additional information
+    '''
     pp.figure(figsize=(10, 5), dpi=110)
     pp.plot(x_mtf, mtfs, label='MTF Filtered')
     pp.axhline(y=0.5, color='r', linestyle='--', label='MTF50')
@@ -1365,11 +1418,11 @@ def plot_mtf_and_esf(edge_image, individual_id, esf, lsf, lsfs, mtf, mtfs, edge_
     # pp.show()
     pp.pause(0.5)  # Anzeige für 1 Sekunde pausieren
     pp.close()  # Fenster schließen
+    '''
 
     print("MTF50:", mtf50)
     print("MTF20:", mtf20)
     print("MTF10:", mtf10)
-
     print("LSF Max:", lsfmax)
     print("LSF Min:", lsfmin)
     print("Contrast Modulation (LSF):", lsfunc)
@@ -1395,7 +1448,7 @@ if results:
         # Entpacken Sie jedes Ergebnis und rufen Sie plot_mtf_and_esf auf
         esf, lsf, lsfs, mtf, mtfs, edge, edge_angle, x_mtf, mtf50, mtf20, mtf10, lsfmax, lsfmin, lsfunc, individual_id = result
         edge_image = edge  # Dies sollte ein numpy array des Kantenbildes sein.
-        plot_mtf_and_esf(edge_image, individual_id, esf, lsf, lsfs, mtf, mtfs, edge_angle, x_mtf, mtf50, mtf20, mtf10, lsfmax, lsfmin, lsfunc)
+        plot_mtf_and_esf(temp_dir, edge_image, individual_id, esf, lsf, lsfs, mtf, mtfs, edge_angle, x_mtf, mtf50, mtf20, mtf10, lsfmax, lsfmin, lsfunc)
         # plot_edge_image(edge_image, individual_id)
 else:
     print("Keine Ergebnisse gefunden.")
@@ -1404,8 +1457,12 @@ else:
 def plot_all_mtfs(results):
     sorted_results = sorted(results, key=lambda x: x[14])
 
-    pp.figure(figsize=(18, 8), dpi=110)
+    # Aktuelles Datum und Uhrzeit erhalten
+    current_time = datetime.datetime.now()
+    # Formatieren des Datums und der Uhrzeit als String
+    time_str = current_time.strftime('%Y-%m-%d %H:%M:%S')
 
+    pp.figure(figsize=(18, 10), dpi=110)
     # Für jede Messung in den Ergebnissen
     for result in sorted_results:
         _, _, _, mtf, mtfs, _, _, x_mtf, mtf50, mtf20, mtf10, _, _, _, individual_id = result
@@ -1414,20 +1471,26 @@ def plot_all_mtfs(results):
         mtf20_rounded = np.round(mtf20, 3)
         mtf50_rounded = np.round(mtf50, 3)
         # Plot der gefilterten MTF-Werte für jede ID
-        pp.plot(x_mtf, mtfs, label=f'ID: {individual_id} /mtf10: {mtf10_rounded} /mtf20: {mtf20_rounded} /mtf50: {mtf50_rounded}')
-        # pp.plot(x_mtf, mtf, color='lightgray', linewidth=1)
+        pp.plot(x_mtf, mtfs, label=f'ID: {individual_id} /mtf50: {mtf50_rounded} /mtf20: {mtf20_rounded} /mtf10: {mtf10_rounded}')
+        pp.plot(x_mtf, mtf, color='lightgray', linewidth=1)
     pp.axhline(y=0.5, color='r', linestyle='--', label='MTF50')
     pp.axhline(y=0.2, color='g', linestyle='--', label='MTF20')
     pp.axhline(y=0.1, color='b', linestyle='--', label='MTF10')
-    pp.title('Alle MTFs')
+    pp.title(f'Alle MTFs')
     pp.xlabel('Frequency (cycles/pixel)')
     pp.ylabel('MTF')
     pp.legend()
     pp.grid(True)
+    # Anzeige von Datum und Uhrzeit im Plot, oben links
+    pp.figtext(0.01, 0.99, f'Aktualisiert am: {time_str} - {os.path.basename(image_path)}', ha="left", va="top", fontsize=10, bbox={"facecolor": "orange", "alpha": 0.5, "pad": 5})
+
+    # ---------sichern der ansicht ----------
+    esf_mtf_filename1 = os.path.join(temp_dir, f"all_mtf_{individual_id}.png")
+    pp.savefig(esf_mtf_filename1)
+    # -Ende----sichern der ansicht ----------
     pp.show()
     # pp.pause(10)  # Anzeige für 1 Sekunde pausieren
     # pp.close()  # Fenster schließen
-
 
 # Annahme: `results` ist die Liste der Ergebnisse, die von `berechnung_mtf(temp_dir)` zurückgegeben wurde
 plot_all_mtfs(results)
